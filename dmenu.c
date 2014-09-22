@@ -21,6 +21,7 @@
 typedef struct Item Item;
 struct Item {
 	char *text;
+	char *key;
 	Item *left, *right;
 	Bool out;
 };
@@ -55,6 +56,7 @@ static Item *prev, *curr, *next, *sel;
 static Window win;
 static XIC xic;
 static int mon = -1;
+static Bool alternating = False;
 
 #include "config.h"
 
@@ -72,6 +74,8 @@ main(int argc, char *argv[]) {
 			puts("dmenu-"VERSION", © 2006-2014 dmenu engineers, see LICENSE for details");
 			exit(EXIT_SUCCESS);
 		}
+        else if(!strcmp(argv[i], "-a"))
+            alternating = True;
 		else if(!strcmp(argv[i], "-b"))   /* appears at the bottom of the screen */
 			topbar = False;
 		else if(!strcmp(argv[i], "-f"))   /* grabs keyboard before reading stdin */
@@ -162,6 +166,7 @@ void
 drawmenu(void) {
 	int curpos;
 	Item *item;
+	int theX, theWidth;
 
 	dc->x = 0;
 	dc->y = 0;
@@ -181,11 +186,20 @@ drawmenu(void) {
 
 	if(lines > 0) {
 		/* draw vertical list */
-		dc->w = mw - dc->x;
+		theX = dc->x;
+		theWidth = mw - dc->x;
 		for(item = curr; item != next; item = item->right) {
 			dc->y += dc->h;
+
+			dc->x = theX;
+			dc->w = theWidth >> 1;
+
 			drawtext(dc, item->text, (item == sel) ? selcol :
 			                         (item->out)   ? outcol : normcol);
+			dc->x += dc->w;
+
+			drawtext(dc, item->key, (item == sel) ? selcol :
+			                        (item->out)   ? outcol : normcol);
 		}
 	}
 	else if(matches) {
@@ -367,7 +381,7 @@ keypress(XKeyEvent *ev) {
 		break;
 	case XK_Return:
 	case XK_KP_Enter:
-		puts((sel && !(ev->state & ShiftMask)) ? sel->text : text);
+		puts((sel && !(ev->state & ShiftMask)) ? sel->key : text);
 		if(!(ev->state & ControlMask))
 			exit(EXIT_SUCCESS);
 		if(sel)
@@ -480,23 +494,42 @@ paste(void) {
 void
 readstdin(void) {
 	char buf[sizeof text], *p, *maxstr = NULL;
-	size_t i, max = 0, size = 0;
+	size_t i = 0, max = 0, size = 0;
+    char *someText;
+    Bool isAlternate = False;
 
 	/* read each line from stdin and add it to the item list */
-	for(i = 0; fgets(buf, sizeof buf, stdin); i++) {
-		if(i+1 >= size / sizeof *items)
-			if(!(items = realloc(items, (size += BUFSIZ))))
-				eprintf("cannot realloc %u bytes:", size);
-		if((p = strchr(buf, '\n')))
-			*p = '\0';
-		if(!(items[i].text = strdup(buf)))
-			eprintf("cannot strdup %u bytes:", strlen(buf)+1);
-		items[i].out = False;
-		if(strlen(items[i].text) > max)
-			max = strlen(maxstr = items[i].text);
-	}
-	if(items)
+    while (fgets(buf, sizeof buf, stdin)) {
+        if((p = strchr(buf, '\n')))
+            *p = '\0';
+
+        if (!isAlternate || !alternating) {
+            if(!(someText = strdup(buf)))
+                eprintf("cannot strdup %u bytes:", strlen(buf)+1);
+        }
+
+        if(i+1 >= size / sizeof *items)
+            if(!(items = realloc(items, (size += BUFSIZ))))
+                eprintf("cannot realloc %u bytes:", size);
+
+        if (isAlternate || !alternating) {
+			items[i].text = someText;
+
+            if(!(items[i].key = strdup(buf)))
+                eprintf("cannot strdup %u bytes:", strlen(buf)+1);
+            items[i].out = False;
+
+            if(strlen(items[i].text) > max)
+                max = strlen(maxstr = items[i].text);
+
+            i++;
+        }
+        isAlternate = !isAlternate;
+    }
+	if(items) {
 		items[i].text = NULL;
+		items[i].key = NULL;
+    }
 	inputw = maxstr ? textw(dc, maxstr) : 0;
 	lines = MIN(lines, i);
 }
